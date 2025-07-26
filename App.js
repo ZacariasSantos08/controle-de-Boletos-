@@ -20,5 +20,5 @@ export default function App() {
       {/* O Toast precisa ser renderizado no topo para aparecer sobre tudo */}
       <Toast />
     </>
-  );
+  ); 
 }
