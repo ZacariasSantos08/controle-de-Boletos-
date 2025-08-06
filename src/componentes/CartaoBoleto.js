@@ -6,68 +6,83 @@ import { Ionicons } from '@expo/vector-icons';
 import { tema } from '../estilos/tema';
 import EtiquetaStatus from './EtiquetaStatus';
 
-const CartaoBoleto = ({ boleto, onEditar, onExcluir, onPagar, onDesmarcar }) => {
+const CartaoBoleto = ({ boleto, onEditar, onExcluir, onPagar, onDesmarcar, onVerAnexo, modoSelecao, isSelecionado, onToggleSelecao }) => {
   const ehPago = boleto.status === 'pago';
-  const valorFormatado = (boleto.valor || 0).toFixed(2).replace('.', ',');
+
+  const valorFormatado = (boleto.valor || 0).toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  const handlePress = () => {
+    if (modoSelecao) {
+      onToggleSelecao(boleto.id);
+    }
+  };
 
   return (
-    <View style={styles.cartao}>
-      <View style={styles.cabecalho}>
-        <View style={{flex: 1}}>
-          <Text style={styles.emissor} numberOfLines={2}>{boleto.emissor}</Text>
-          <Text style={styles.descricao}>{boleto.descricao}</Text>
-        </View>
-        <EtiquetaStatus status={boleto.status} />
-      </View>
-      <View style={styles.linhaInfo}>
-        <Ionicons name="cash-outline" size={20} color={tema.cores.primaria} />
-        <Text style={styles.valor}>R$ {valorFormatado}</Text>
-      </View>
-      {boleto.jurosMulta > 0 && (
-        <View style={styles.linhaInfo}>
-          <Ionicons name="add-circle-outline" size={20} color={tema.cores.aviso} />
-          <Text style={styles.textoJuros}>
-            Juros/Multa Pago: R$ {boleto.jurosMulta.toFixed(2).replace('.', ',')}
-          </Text>
+    <TouchableOpacity onPress={handlePress} disabled={!modoSelecao} style={[styles.card, isSelecionado && styles.cardSelecionada]}>
+      {modoSelecao && (
+        <View style={styles.checkboxContainer}>
+          <Ionicons 
+            name={isSelecionado ? "checkbox" : "square-outline"} 
+            size={26} 
+            color={tema.cores.primaria} 
+          />
         </View>
       )}
-      {!ehPago && boleto.vencimento && (
-        <View style={styles.linhaInfo}>
-          <Ionicons name="calendar-outline" size={20} color={tema.cores.primaria} />
-          <Text style={styles.textoInfo}>Vencimento: {format(parseISO(boleto.vencimento), "dd 'de' MMMM 'de' yyyy", { locale: ptBR })}</Text>
+      <View style={{flex: 1}}>
+        <View style={styles.cabecalho}>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={styles.emissor} numberOfLines={2}>{boleto.emissor}</Text>
+            <Text style={styles.descricao}>{boleto.descricao}</Text>
+          </View>
+          <EtiquetaStatus status={boleto.status} />
         </View>
-      )}
-      {ehPago && boleto.dataPagamento && (
-         <View style={styles.linhaInfo}>
-          <Ionicons name="checkmark-circle-outline" size={20} color={tema.cores.sucesso} />
-          <Text style={[styles.textoInfo, {color: tema.cores.sucesso}]}>Pago em: {format(parseISO(boleto.dataPagamento), "dd/MM/yyyy", { locale: ptBR })}</Text>
+
+        <View style={styles.infoContainer}>
+          <View style={styles.linhaInfo}><Ionicons name="cash-outline" size={20} color={tema.cores.primaria} /><Text style={styles.valor}>R$ {valorFormatado}</Text></View>
+          {boleto.numeroDocumento && (<View style={styles.linhaInfo}><Ionicons name="document-text-outline" size={20} color={tema.cores.cinza} /><Text style={styles.textoInfo}>Nº do Boleto: {boleto.numeroDocumento}</Text></View>)}
+          {boleto.pagador && (<View style={styles.linhaInfo}><Ionicons name="person-outline" size={20} color={tema.cores.cinza} /><Text style={styles.textoInfo}>Pagador: {boleto.pagador}</Text></View>)}
+          {boleto.anexoUri && (<TouchableOpacity disabled={modoSelecao} style={styles.linhaInfo} onPress={() => onVerAnexo(boleto.anexoUri)}><Ionicons name="attach-outline" size={20} color={tema.cores.secundaria} /><Text style={[styles.textoInfo, { color: tema.cores.secundaria, fontWeight: 'bold' }]}>Ver comprovante</Text></TouchableOpacity>)}
+          {boleto.jurosMulta > 0 && (<View style={styles.linhaInfo}><Ionicons name="add-circle-outline" size={20} color={tema.cores.aviso} /><Text style={styles.textoJuros}>Juros/Multa Pago: R$ {(boleto.jurosMulta).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2, })}</Text></View>)}
+          {!ehPago && boleto.vencimento && (<View style={styles.linhaInfo}><Ionicons name="calendar-outline" size={20} color={tema.cores.primaria} /><Text style={styles.textoInfo}>Vencimento: {format(parseISO(boleto.vencimento), "dd 'de' MMMM", { locale: ptBR })}</Text></View>)}
+          {ehPago && boleto.dataPagamento && (<View style={styles.linhaInfo}><Ionicons name="checkmark-circle-outline" size={20} color={tema.cores.sucesso} /><Text style={[styles.textoInfo, { color: tema.cores.sucesso }]}>Pago em: {format(parseISO(boleto.dataPagamento), 'dd/MM/yyyy', { locale: ptBR })}</Text></View>)}
         </View>
-      )}
-      <View style={styles.containerAcoes}>
-        {!ehPago ? (
-          <>
-            <TouchableOpacity style={styles.botaoAcao} onPress={() => onPagar(boleto)}><Ionicons name="checkmark-done-circle-outline" size={24} color={tema.cores.sucesso} /><Text style={[styles.textoAcao, {color: tema.cores.sucesso}]}>Pagar</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.botaoAcao} onPress={() => onEditar(boleto)}><Ionicons name="pencil-outline" size={24} color={tema.cores.aviso} /><Text style={[styles.textoAcao, {color: tema.cores.aviso}]}>Editar</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.botaoAcao} onPress={() => onExcluir(boleto.id)}><Ionicons name="trash-outline" size={24} color={tema.cores.erro} /><Text style={[styles.textoAcao, {color: tema.cores.erro}]}>Excluir</Text></TouchableOpacity>
-          </>
-        ) : (
-          <TouchableOpacity style={styles.botaoAcao} onPress={() => onDesmarcar(boleto.id)}><Ionicons name="arrow-undo-outline" size={24} color={tema.cores.erro} /><Text style={[styles.textoAcao, {color: tema.cores.erro}]}>Desmarcar</Text></TouchableOpacity>
+
+        {!modoSelecao && (
+          <View style={styles.containerAcoes}>
+            {!ehPago ? (
+              <>
+                <TouchableOpacity style={styles.botaoAcao} onPress={() => onPagar(boleto)}><Ionicons name="checkmark-done-circle-outline" size={24} color={tema.cores.sucesso} /><Text style={[styles.textoAcao, { color: tema.cores.sucesso }]}>Pagar</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.botaoAcao} onPress={() => onEditar(boleto)}><Ionicons name="pencil-outline" size={24} color={tema.cores.aviso} /><Text style={[styles.textoAcao, { color: tema.cores.aviso }]}>Editar</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.botaoAcao} onPress={() => onExcluir(boleto.id)}><Ionicons name="trash-outline" size={24} color={tema.cores.erro} /><Text style={[styles.textoAcao, { color: tema.cores.erro }]}>Excluir</Text></TouchableOpacity>
+              </>
+            ) : (
+              <TouchableOpacity style={styles.botaoAcao} onPress={() => onDesmarcar(boleto.id)}><Ionicons name="arrow-undo-outline" size={24} color={tema.cores.erro} /><Text style={[styles.textoAcao, { color: tema.cores.erro }]}>Desmarcar</Text></TouchableOpacity>
+            )}
+          </View>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
+
 const styles = StyleSheet.create({
-  cartao: { backgroundColor: '#FFFFFF', borderRadius: tema.raioBorda.medio, padding: tema.espacamento.medio, marginVertical: tema.espacamento.pequeno, marginHorizontal: tema.espacamento.medio, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2, },
-  cabecalho: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: tema.espacamento.pequeno, },
-  emissor: { fontSize: 18, fontWeight: 'bold', color: tema.cores.texto, },
-  descricao: { fontSize: 14, color: tema.cores.cinza, },
-  linhaInfo: { flexDirection: 'row', alignItems: 'center', marginVertical: 4, },
-  valor: { fontSize: 20, fontWeight: 'bold', color: tema.cores.primaria, marginLeft: tema.espacamento.pequeno, },
-  textoInfo: { fontSize: 14, color: tema.cores.cinza, marginLeft: tema.espacamento.pequeno, },
-  textoJuros: { fontSize: 14, color: tema.cores.aviso, marginLeft: tema.espacamento.pequeno, fontWeight: 'bold', },
-  containerAcoes: { flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: tema.cores.borda, marginTop: tema.espacamento.medio, paddingTop: tema.espacamento.medio, },
-  botaoAcao: { alignItems: 'center', paddingHorizontal: 10, flex: 1 },
-  textoAcao: { fontSize: 12, marginTop: 4, }
+    card: { flexDirection: 'row', alignItems: 'center', backgroundColor: tema.cores.superficie, borderRadius: tema.raioBorda.medio, padding: tema.espacamento.medio, marginVertical: tema.espacamento.pequeno, marginHorizontal: tema.espacamento.medio, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.15, shadowRadius: 2, },
+    cardSelecionada: { borderColor: tema.cores.primaria, borderWidth: 2, backgroundColor: '#E3F2FD' },
+    checkboxContainer: { justifyContent: 'center', alignItems: 'center', paddingRight: tema.espacamento.medio, },
+    cabecalho: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', borderBottomWidth: 1, borderBottomColor: tema.cores.borda, paddingBottom: tema.espacamento.pequeno, marginBottom: tema.espacamento.pequeno, },
+    emissor: { fontSize: 18, fontWeight: 'bold', color: tema.cores.texto, },
+    descricao: { fontSize: 14, color: tema.cores.cinza, fontStyle: 'italic', },
+    infoContainer: { paddingVertical: tema.espacamento.pequeno, },
+    linhaInfo: { flexDirection: 'row', alignItems: 'center', marginVertical: 4, },
+    valor: { fontSize: 20, fontWeight: 'bold', color: tema.cores.primaria, marginLeft: tema.espacamento.pequeno, },
+    textoInfo: { fontSize: 14, color: tema.cores.cinza, marginLeft: tema.espacamento.pequeno, },
+    textoJuros: { fontSize: 14, color: tema.cores.aviso, marginLeft: tema.espacamento.pequeno, fontWeight: 'bold', },
+    containerAcoes: { flexDirection: 'row', justifyContent: 'space-around', paddingTop: tema.espacamento.medio, },
+    botaoAcao: { alignItems: 'center', paddingHorizontal: 10, flex: 1, },
+    textoAcao: { fontSize: 12, marginTop: 4, },
 });
+
 export default CartaoBoleto;

@@ -6,7 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -30,7 +29,19 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font"
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permitir que o $(PRODUCT_NAME) acesse sua câmera para ler códigos de barras."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O aplicativo precisa de acesso às suas fotos para que você possa anexar comprovantes.",
+          "cameraPermission": "O aplicativo precisa de acesso à sua câmera para que você possa anexar fotos de comprovantes."
+        }
+      ]
     ],
     "extra": {
       "eas": {
