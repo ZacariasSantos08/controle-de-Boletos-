@@ -199,7 +199,7 @@ const EstatisticasTela = () => {
                 data={dadosGraficoBarras}
                 width={barChartWidth}
                 height={220}
-                yAxisLabel="R$ "
+               // yAxisLabel="R$ "
                 chartConfig={chartConfig}
                 bezier
               />
@@ -348,7 +348,7 @@ const chartConfig = {
 };
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: tema.cores.fundo },
+  safeArea: { flex: 1, backgroundColor: tema.cores.fundo, paddingTop: 12 },
   contentContainer: {
     paddingVertical: tema.espacamento.grande,
     paddingHorizontal: tema.espacamento.medio

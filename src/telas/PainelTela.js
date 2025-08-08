@@ -154,7 +154,7 @@ const PainelTela = () => {
                     chartConfig={chartConfig}
                     fromZero
                     showValuesOnTopOfBars
-                    yAxisLabel="R$ "
+                    //yAxisLabel="R$ "
                     style={{ borderRadius: tema.raioBorda.medio }}
                 />
             ) : (
@@ -169,9 +169,9 @@ const PainelTela = () => {
     </SafeAreaView>
   );
 };
-
+ 
 const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: tema.cores.fundo },
+    safeArea: { flex: 1, backgroundColor: tema.cores.fundo, paddingTop: 12},
     contentContainer: { padding: tema.espacamento.grande, },
     titulo: { ...tema.tipografia.titulo, color: tema.cores.primaria, marginBottom: tema.espacamento.grande, textAlign: 'center', },
     card: { backgroundColor: tema.cores.superficie, borderRadius: tema.raioBorda.medio, padding: tema.espacamento.medio, flexDirection: 'row', alignItems: 'center', marginBottom: tema.espacamento.medio, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, },
