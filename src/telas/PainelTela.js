@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ContextoBoletos } from '../contexto/ContextoBoletos';
 import { tema } from '../estilos/tema';
 import { isAfter, parseISO, differenceInCalendarDays, subDays, format } from 'date-fns';
-import { ptBR } from 'date-fns/locale'; // CORREÇÃO AQUI
+import { ptBR } from 'date-fns/locale';
 import { BarChart } from "react-native-chart-kit";
 
 const screenWidth = Dimensions.get("window").width;
@@ -23,38 +23,20 @@ const CardResumo = ({ icone, titulo, valor, cor, filtro, onPress }) => (
 );
 
 const ItemProximoVencimento = ({ item, navigation }) => {
-  
   const formatarDataVencimento = (data) => {
     const hoje = new Date();
     const dataVenc = parseISO(data);
     const diasParaVencer = differenceInCalendarDays(dataVenc, hoje);
-
-    if (diasParaVencer === 0) {
-      return { texto: 'Vence hoje', cor: tema.cores.aviso };
-    }
-    if (diasParaVencer === 1) {
-      return { texto: 'Vence amanhã', cor: tema.cores.aviso };
-    }
-    if (diasParaVencer > 1) {
-      return { texto: `Vence em ${diasParaVencer} dias`, cor: tema.cores.primaria };
-    }
+    if (diasParaVencer === 0) return { texto: 'Vence hoje', cor: tema.cores.aviso };
+    if (diasParaVencer === 1) return { texto: 'Vence amanhã', cor: tema.cores.aviso };
+    if (diasParaVencer > 1) return { texto: `Vence em ${diasParaVencer} dias`, cor: tema.cores.primaria };
     return { texto: 'Vencido', cor: tema.cores.erro };
   };
-
   const { texto, cor } = formatarDataVencimento(item.vencimento);
-  const valorFormatado = (item.valor || 0).toLocaleString('pt-BR', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-
+  const valorFormatado = (item.valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (
-    <TouchableOpacity 
-      style={styles.itemVencimentoContainer}
-      onPress={() => navigation.navigate('Boletos', { screen: 'FormularioBoleto', params: { boletoId: item.id } })}
-    >
-      <View style={styles.itemVencimentoIcone}>
-        <Ionicons name="document-text-outline" size={24} color={tema.cores.primaria} />
-      </View>
+    <TouchableOpacity style={styles.itemVencimentoContainer} onPress={() => navigation.navigate('Boletos', { screen: 'FormularioBoleto', params: { boletoId: item.id } })}>
+      <View style={styles.itemVencimentoIcone}><Ionicons name="document-text-outline" size={24} color={tema.cores.primaria} /></View>
       <View style={styles.itemVencimentoInfo}>
         <Text style={styles.itemVencimentoDescricao} numberOfLines={1}>{item.descricao}</Text>
         <Text style={styles.itemVencimentoEmissor} numberOfLines={1}>{item.emissor}</Text>
@@ -83,10 +65,11 @@ const PainelTela = () => {
   const navigation = useNavigation();
 
   const dadosPainel = useMemo(() => {
-    const pendentes = boletos.filter(b => b.status !== 'pago');
-    const vencidos = pendentes.filter(b => b.status === 'vencido');
-    const vencendo = pendentes.filter(b => b.status === 'vencendo');
-    const pagos = boletos.filter(b => b.status === 'pago');
+    const listaBoletos = boletos || []; // GARANTIA
+  const pendentes = (listaBoletos || []).filter(b => b.status !== 'pago');
+  const vencidos = (listaBoletos || []).filter(b => b.status === 'vencido');
+  const vencendo = (listaBoletos || []).filter(b => b.status === 'vencendo');
+  const pagos = (listaBoletos || []).filter(b => b.status === 'pago');
     const totalAberto = pendentes.reduce((acc, b) => acc + (b.valor || 0), 0);
     const totalVencido = vencidos.reduce((acc, b) => acc + (b.valor || 0), 0);
     const totalVencendo = vencendo.reduce((acc, b) => acc + (b.valor || 0), 0);
@@ -96,7 +79,7 @@ const PainelTela = () => {
 
   const proximosVencimentos = useMemo(() => {
     const hoje = new Date();
-    return boletos
+    return (boletos || []) // GARANTIA
       .filter(b => 
         b.status !== 'pago' && isAfter(parseISO(b.vencimento), subDays(hoje, 1))
       )
@@ -105,7 +88,7 @@ const PainelTela = () => {
   }, [boletos]);
 
   const dadosGraficoResumo = useMemo(() => {
-    const boletosPagos = boletos.filter(b => b.status === 'pago');
+    const boletosPagos = (boletos || []).filter(b => b.status === 'pago'); // GARANTIA
     if (boletosPagos.length === 0) return { labels: [], datasets: [{ data: [] }] };
     
     const pagamentosPorMes = {};
@@ -129,12 +112,10 @@ const PainelTela = () => {
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.contentContainer}>
         <Text style={styles.titulo}>Resumo Financeiro</Text>
-
         <CardResumo icone="wallet-outline" titulo="Total em Aberto" valor={`R$ ${dadosPainel.totalAberto.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} cor={tema.cores.primaria} filtro="pendentes" onPress={navegarParaLista} />
         <CardResumo icone="alert-circle-outline" titulo="Total Vencendo" valor={`R$ ${dadosPainel.totalVencendo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} cor={tema.cores.aviso} filtro="vencendo" onPress={navegarParaLista} />
         <CardResumo icone="close-circle-outline" titulo="Total Vencido" valor={`R$ ${dadosPainel.totalVencido.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} cor={tema.cores.erro} filtro="vencido" onPress={navegarParaLista} />
         <CardResumo icone="checkmark-circle-outline" titulo="Total Pago" valor={`R$ ${dadosPainel.totalPago.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} cor={tema.cores.sucesso} filtro="pago" onPress={navegarParaLista} />
-
         <View style={styles.secaoVencimentos}>
           <Text style={styles.tituloSecao}>Próximos Vencimentos</Text>
           {proximosVencimentos.length > 0 ? (
@@ -143,20 +124,10 @@ const PainelTela = () => {
             <View style={styles.semVencimentosContainer}><Text style={styles.semVencimentosTexto}>Nenhum boleto a vencer nos próximos dias.</Text><Text style={styles.semVencimentosSubtexto}>Você está em dia!</Text></View>
           )}
         </View>
-
         <View style={styles.secaoGrafico}>
             <Text style={styles.tituloSecao}>Resumo dos Últimos Meses</Text>
             {dadosGraficoResumo.labels.length > 0 ? (
-                <BarChart
-                    data={dadosGraficoResumo}
-                    width={screenWidth - tema.espacamento.grande * 2}
-                    height={220}
-                    chartConfig={chartConfig}
-                    fromZero
-                    showValuesOnTopOfBars
-                    //yAxisLabel="R$ "
-                    style={{ borderRadius: tema.raioBorda.medio }}
-                />
+                <BarChart data={dadosGraficoResumo} width={screenWidth - tema.espacamento.grande * 2} height={220} chartConfig={chartConfig} fromZero showValuesOnTopOfBars yAxisLabel="R$ " style={{ borderRadius: tema.raioBorda.medio }}/>
             ) : (
                 <View style={styles.semVencimentosContainer}>
                     <Text style={styles.semVencimentosTexto}>Não há dados de pagamentos.</Text>
@@ -164,14 +135,13 @@ const PainelTela = () => {
                 </View>
             )}
         </View>
-
       </ScrollView>
     </SafeAreaView>
   );
 };
- 
+
 const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: tema.cores.fundo, paddingTop: 12},
+    safeArea: { flex: 1, backgroundColor: tema.cores.fundo },
     contentContainer: { padding: tema.espacamento.grande, },
     titulo: { ...tema.tipografia.titulo, color: tema.cores.primaria, marginBottom: tema.espacamento.grande, textAlign: 'center', },
     card: { backgroundColor: tema.cores.superficie, borderRadius: tema.raioBorda.medio, padding: tema.espacamento.medio, flexDirection: 'row', alignItems: 'center', marginBottom: tema.espacamento.medio, elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, },

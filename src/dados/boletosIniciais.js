@@ -1,169 +1,871 @@
-import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react';
-// CORREÇÃO: Removido o hífen extra do nome do pacote
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LayoutAnimation } from 'react-native';
-import { isBefore, isToday, differenceInDays, addMonths } from 'date-fns';
-import uuid from 'react-native-uuid';
-import { boletosIniciais } from '../dados/boletosIniciais';
-import { agendarNotificacao, cancelarNotificacao } from '../servicos/servicoNotificacoes';
 
-export const ContextoBoletos = createContext();
 
-const CHAVE_ARMAZENAMENTO_BOLETOS = '@ControleDeBoletos:boletos';
-
-export const obterStatus = (boleto) => {
-  if (boleto.status === 'pago') return 'pago';
-  const hoje = new Date();
-  const dataVencimento = new Date(boleto.vencimento);
-  const diasParaVencer = differenceInDays(dataVencimento, hoje);
-  if (isBefore(dataVencimento, hoje) && !isToday(dataVencimento))
-    return 'vencido';
-  if (diasParaVencer >= 0 && diasParaVencer <= 3) return 'vencendo';
-  return 'aPagar';
-};
-
-export function ProvedorBoletos({ children }) {
-  const [boletos, setBoletos] = useState([]);
-  const [estaCarregando, setEstaCarregando] = useState(true);
-
-  const carregarBoletos = useCallback(async () => {
-    try {
-      const boletosSalvos = await AsyncStorage.getItem(CHAVE_ARMAZENAMENTO_BOLETOS);
-      let dadosIniciaisApp = boletosSalvos ? JSON.parse(boletosSalvos) : boletosIniciais;
-      if (!Array.isArray(dadosIniciaisApp) || dadosIniciaisApp.length === 0) {
-        dadosIniciaisApp = boletosIniciais;
-      }
-      setBoletos(dadosIniciaisApp);
-    } catch (e) {
-      setBoletos(boletosIniciais);
-    } finally {
-      setTimeout(() => setEstaCarregando(false), 1200);
-    }
-  }, []);
-
-  const salvarBoletos = useCallback(async (novosBoletos) => {
-    try {
-      const jsonValue = JSON.stringify(novosBoletos);
-      await AsyncStorage.setItem(CHAVE_ARMAZENAMENTO_BOLETOS, jsonValue);
-    } catch (e) { console.error('Falha ao salvar boletos.', e); }
-  }, []);
-
-  useEffect(() => { carregarBoletos(); }, []);
-
-  useEffect(() => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-    if (!estaCarregando) { salvarBoletos(boletos); }
-  }, [boletos, estaCarregando, salvarBoletos]);
-
-  const boletosComStatusAtualizado = useMemo(() => {
-    if (!Array.isArray(boletos)) return [];
-    return boletos.map(b => ({ ...b, status: obterStatus(b) }));
-  }, [boletos]);
-
-  const adicionarBoleto = async (dadosBoleto, recorrencia) => {
-    const { ehRecorrente, parcelas } = recorrencia;
-    const boletosParaAdicionar = [];
-
-    if (!ehRecorrente) {
-      const novoBoleto = { ...dadosBoleto, id: uuid.v4() };
-      if (novoBoleto.status !== 'pago') {
-        novoBoleto.idNotificacao = await agendarNotificacao(novoBoleto);
-      }
-      boletosParaAdicionar.push(novoBoleto);
-    } else {
-      const dataVencimentoInicial = new Date(dadosBoleto.vencimento);
-      const idRecorrencia = uuid.v4();
-      for (let i = 0; i < parcelas; i++) {
-        const vencimentoParcela = addMonths(dataVencimentoInicial, i);
-        const novoBoleto = {
-          ...dadosBoleto,
-          id: uuid.v4(),
-          descricao: `${dadosBoleto.descricao} (${i + 1}/${parcelas})`,
-          vencimento: vencimentoParcela.toISOString(),
-          status: 'aPagar',
-          idNotificacao: null, dataPagamento: null, valorPago: null,
-          jurosMulta: null, anexoUri: null, idRecorrencia: idRecorrencia,
-        };
-        novoBoleto.idNotificacao = await agendarNotificacao(novoBoleto);
-        boletosParaAdicionar.push(novoBoleto);
-      }
-    }
-    setBoletos(boletosAtuais => [...boletosParaAdicionar, ...boletosAtuais]);
-  };
-
-  const atualizarBoleto = async (boletoAtualizado) => {
-    const boletoAntigo = boletos.find(b => b.id === boletoAtualizado.id);
-    if (boletoAntigo && boletoAntigo.vencimento !== boletoAtualizado.vencimento && boletoAntigo.idNotificacao) {
-      await cancelarNotificacao(boletoAntigo.idNotificacao);
-      boletoAtualizado.idNotificacao = await agendarNotificacao(boletoAtualizado);
-    }
-    setBoletos(boletosAtuais => boletosAtuais.map(b => (b.id === boletoAtualizado.id ? boletoAtualizado : b)));
-  };
-
-  const removerBoleto = async (idBoleto) => {
-    const boletoParaRemover = boletos.find(b => b.id === idBoleto);
-    if (boletoParaRemover?.idNotificacao) {
-      await cancelarNotificacao(boletoParaRemover.idNotificacao);
-    }
-    setBoletos(boletosAtuais => boletosAtuais.filter(b => b.id !== idBoleto));
-  };
-  
-  const removerBoletosEmMassa = async (idsParaRemover) => {
-    const idsSet = new Set(idsParaRemover);
-    const boletosParaManter = [];
-    const boletosParaRemover = [];
-
-    boletos.forEach(boleto => {
-      if (idsSet.has(boleto.id)) {
-        boletosParaRemover.push(boleto);
-      } else {
-        boletosParaManter.push(boleto);
-      }
-    });
-
-    for (const boleto of boletosParaRemover) {
-      if (boleto.idNotificacao) {
-        await cancelarNotificacao(boleto.idNotificacao);
-      }
-    }
-
-    setBoletos(boletosParaManter);
-  };
-
-  const marcarComoPago = async (idBoleto, dataPagamento, valorPago, jurosMulta, anexoUri) => {
-    const boletoParaPagar = boletos.find(b => b.id === idBoleto);
-    if (boletoParaPagar?.idNotificacao) {
-      await cancelarNotificacao(boletoParaPagar.idNotificacao);
-    }
-    setBoletos(boletosAtuais => boletosAtuais.map(b => b.id === idBoleto ? { ...b, status: 'pago', dataPagamento, valorPago, jurosMulta, anexoUri, idNotificacao: null } : b));
-  };
-
-  const desmarcarComoPago = async (idBoleto) => {
-    let boletoParaReativar = null;
-    const novosBoletos = boletos.map(b => {
-      if (b.id === idBoleto) {
-        boletoParaReativar = { ...b, status: 'aPagar', dataPagamento: null, valorPago: null, jurosMulta: null };
-        return boletoParaReativar;
-      }
-      return b;
-    });
-    if (boletoParaReativar) {
-      boletoParaReativar.idNotificacao = await agendarNotificacao(boletoParaReativar);
-    }
-    setBoletos(novosBoletos);
-  };
-
-  const todosEmissoresUnicos = useMemo(() => { const emissores = boletos.map(b => b.emissor).filter(Boolean); return [...new Set(emissores)]; }, [boletos]);
-  const todasDescricoesUnicas = useMemo(() => { const descricoes = boletos.map(b => b.descricao).filter(Boolean); return [...new Set(descricoes)]; }, [boletos]);
-  const todosPagadoresUnicos = useMemo(() => { const pagadores = boletos.map(b => b.pagador).filter(Boolean); return [...new Set(pagadores)]; }, [boletos]);
-
-  return (
-    <ContextoBoletos.Provider value={{
-      boletos: boletosComStatusAtualizado, estaCarregando, adicionarBoleto,
-      atualizarBoleto, removerBoleto, removerBoletosEmMassa, marcarComoPago,
-      desmarcarComoPago, todosEmissoresUnicos, todasDescricoesUnicas, todosPagadoresUnicos
-    }}>
-      {children}
-    </ContextoBoletos.Provider>
-  );
-}
+export const boletosIniciais = [
+  {
+    "emissor": "Teste 111",
+    "descricao": "Teste 34",
+    "pagador": "Teste 34",
+    "valor": 1.25,
+    "vencimento": "2025-08-06T18:05:00.000Z",
+    "linhaDigitavel": "",
+    "numeroDocumento": "",
+    "observacoes": "",
+    "anexoUri": null,
+    "idNotificacao": null,
+    "jurosMulta": null,
+    "status": "pago",
+    "valorPago": 1.25,
+    "dataPagamento": "2025-08-06T18:05:14.695Z",
+    "id": "4fd0531f-c96f-4e77-ad38-934ed6a440d7"
+  },
+  {
+    "emissor": "Teste 34",
+    "descricao": "Teste 34",
+    "pagador": "Teste 34",
+    "valor": 12.23,
+    "vencimento": "2025-08-06T15:15:00.000Z",
+    "numeroDocumento": "",
+    "observacoes": "",
+    "anexoUri": "file:///data/user/0/host.exp.exponent/files/anexos/2cfafd57-b790-4f3b-a2f1-22ea279692c1.jpeg",
+    "id": "244154ea-fc55-4cce-b887-61fc9d77a39e",
+    "status": "vencido",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "jurosMulta": null,
+    "linhaDigitavel": ""
+  },
+  {
+    "id": "186ca2a1-acbe-4dee-a142-977ba056e4d5",
+    "emissor": "Empresa de Energia S.A.",
+    "descricao": "Consumo de energia.",
+    "pagador": "",
+    "valor": 150.75,
+    "vencimento": "2025-07-22T11:46:21.343Z",
+    "numeroDocumento": "1111.1111.1111.1111 1 11111111111111",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Consumo de energia.",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "b004a147-1bb4-42e3-918d-4c9a4577436e",
+    "emissor": "Universidade Aprender Mais",
+    "descricao": "Mensalidade.",
+    "pagador": "",
+    "valor": 780,
+    "vencimento": "2025-07-19T11:46:21.344Z",
+    "numeroDocumento": "2222.2222.2222.2222 2 22222222222222",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Mensalidade.",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "0a727158-7578-4ed8-987a-342b989497f5",
+    "emissor": "Universidade Aprender Mais",
+    "descricao": "Mensalidade.",
+    "pagador": "",
+    "valor": 780,
+    "vencimento": "2025-07-19T11:46:21.344Z",
+    "numeroDocumento": "2222.2222.2222.2222 2 22222222222222",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Mensalidade.",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "119f038b-e30a-46c2-8427-75508d80c575",
+    "emissor": "Universidade Aprender Mais",
+    "descricao": "Mensalidade.",
+    "pagador": "",
+    "valor": 780,
+    "vencimento": "2025-07-19T11:46:21.344Z",
+    "numeroDocumento": "2222.2222.2222.2222 2 22222222222222",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Mensalidade.",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "bf04f85b-78e7-41a2-8a71-845eb7dd5822",
+    "emissor": "Universidade Aprender Mais",
+    "descricao": "Mensalidade.",
+    "pagador": "",
+    "valor": 780,
+    "vencimento": "2025-07-19T11:46:21.344Z",
+    "numeroDocumento": "2222.2222.2222.2222 2 22222222222222",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Mensalidade.",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "f2333647-332f-4f9f-82b5-ff35c5cb6024",
+    "emissor": "Universidade Aprender Mais",
+    "descricao": "Mensalidade.",
+    "pagador": "",
+    "valor": 780,
+    "vencimento": "2025-07-19T11:46:21.344Z",
+    "numeroDocumento": "2222.2222.2222.2222 2 22222222222222",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Mensalidade.",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "945dd74f-0c5f-43de-96c2-47ef37bb66b4",
+    "emissor": "Universidade Aprender Mais",
+    "descricao": "Mensalidade.",
+    "pagador": "",
+    "valor": 780,
+    "vencimento": "2025-07-19T11:46:21.344Z",
+    "numeroDocumento": "2222.2222.2222.2222 2 22222222222222",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Mensalidade.",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "0115e159-5b51-4acc-bfb3-b7719868da91",
+    "emissor": "Comercial ROFE Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1060.77,
+    "vencimento": "2025-10-13T03:00:00.000Z",
+    "numeroDocumento": "204287621",
+    "linhaDigitavel": "",
+    "status": "aPagar",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "c9de4b2d-ac96-4670-9cb7-03a5fc1516d9",
+    "emissor": "Comercial ROFE Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1060.77,
+    "vencimento": "2025-09-12T03:00:00.000Z",
+    "numeroDocumento": "204287620",
+    "linhaDigitavel": "",
+    "status": "aPagar",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "a9575c70-5aa9-4fae-9ff4-8ffb2be918aa",
+    "emissor": "Comercial ROFE Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1060.77,
+    "vencimento": "2025-08-12T03:00:00.000Z",
+    "numeroDocumento": "204287619",
+    "linhaDigitavel": "",
+    "status": "vencendo",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "1f2aa76a-7e35-489c-a09a-744f90992dfd",
+    "emissor": "DARE",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 1101.03,
+    "vencimento": "2025-07-31T03:00:00.000Z",
+    "numeroDocumento": "143506778",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "21f04dc4-ef4b-4c1d-b133-6f5931eca2db",
+    "emissor": "DARE",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 38.09,
+    "vencimento": "2025-07-31T03:00:00.000Z",
+    "numeroDocumento": "143507162",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "ff42b522-c559-433e-a22d-177fd122643b",
+    "emissor": "Comercial ROFE Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1060.77,
+    "vencimento": "2025-07-12T03:00:00.000Z",
+    "numeroDocumento": "204287618",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "98472592-8643-40c4-be06-c2c7f7042a60",
+    "emissor": "Equatorial",
+    "descricao": "Energia Eletrica",
+    "pagador": "",
+    "valor": 136.73,
+    "vencimento": "2025-07-08T03:00:00.000Z",
+    "numeroDocumento": "02025061239 60067",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Energia Eletrica",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "c246c0d1-ef34-42e2-91e6-586cddaa1e37",
+    "emissor": "Equatorial",
+    "descricao": "Energia Eletrica",
+    "pagador": "",
+    "valor": 136.73,
+    "vencimento": "2025-07-08T03:00:00.000Z",
+    "numeroDocumento": "30176665226",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Energia Eletrica",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "4cb2f0b4-3b27-4bf2-8b5c-199ac72dbed0",
+    "emissor": "Tecnotel Tecnologia e Telecomunicação e Sistemas Itda",
+    "descricao": "Telefonia",
+    "pagador": "",
+    "valor": 102.79,
+    "vencimento": "2025-07-04T03:00:00.000Z",
+    "numeroDocumento": "2340",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Telefonia",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "d4dd9ecf-7306-4ce7-b0c2-7960e3ae2f66",
+    "emissor": "Tecnotel Tecnologia e Telecomunicação e Sistemas Itda",
+    "descricao": "Telefonia",
+    "pagador": "",
+    "valor": 102.79,
+    "vencimento": "2025-07-04T03:00:00.000Z",
+    "numeroDocumento": "2341",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Telefonia",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "98daf89d-6075-4621-acd9-3caf5e965b7f",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 282.44,
+    "vencimento": "2025-06-20T03:00:00.000Z",
+    "numeroDocumento": "07202516395 396790",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "ca667f1a-fff6-48c6-a998-7c561e38fe62",
+    "emissor": "Comercial ROFE Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1060.77,
+    "vencimento": "2025-06-12T03:00:00.000Z",
+    "numeroDocumento": "204287617",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "f3d80e3d-f599-4abe-bb06-45ebdb5839b8",
+    "emissor": "Interbrasil Distribuidora Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1054.67,
+    "vencimento": "2025-05-30T03:00:00.000Z",
+    "numeroDocumento": "42336363",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": "2025-05-30T03:00:00.000Z",
+    "valorPago": 1054.67,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "67326f4e-8ceb-46d3-8ebe-ab9bf8afa466",
+    "emissor": "Bartofil Distribuidora S.A",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 3444.34,
+    "vencimento": "2025-05-30T03:00:00.000Z",
+    "numeroDocumento": "20436611",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": "2025-05-28T03:00:00.000Z",
+    "valorPago": 3444.34,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "f6da88a3-6415-4be3-9588-d840d122ad05",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 338.51,
+    "vencimento": "2025-05-20T03:00:00.000Z",
+    "numeroDocumento": "07202513968 583998",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "ba3b97be-5b04-4b47-a54e-e0ebbe55de1c",
+    "emissor": "DARE",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 77.43,
+    "vencimento": "2025-05-20T03:00:00.000Z",
+    "numeroDocumento": null,
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "6d443148-ee89-46a9-83fc-271a48877acb",
+    "emissor": "Martins Com. E. Serv. De Distribuição S.A",
+    "descricao": "Reenbolso de Despesa bancária",
+    "pagador": "",
+    "valor": 2053.45,
+    "vencimento": "2025-05-17T03:00:00.000Z",
+    "numeroDocumento": "00009535972",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Reenbolso de Despesa bancária",
+    "idNotificacao": null,
+    "dataPagamento": "2025-05-14T03:00:00.000Z",
+    "valorPago": 2053.45,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "dfcaf71b-10f6-462b-a7be-e3446a722871",
+    "emissor": "DARE",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 35.97,
+    "vencimento": "2025-04-22T03:00:00.000Z",
+    "numeroDocumento": null,
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "709a4c8d-3617-45d7-951d-b4e4375d6961",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 299.08,
+    "vencimento": "2025-04-22T03:00:00.000Z",
+    "numeroDocumento": "07202510437 370913",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "6b7fe67e-68cf-45ce-a330-62397ae73e85",
+    "emissor": "DARE",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 75.28,
+    "vencimento": "2025-03-20T03:00:00.000Z",
+    "numeroDocumento": null,
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "65febfd2-7cd3-4584-8e24-70f7dc74ac66",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 765.56,
+    "vencimento": "2025-03-20T03:00:00.000Z",
+    "numeroDocumento": "07202507023 499490",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "92d0b4ee-9808-4d1b-b3cc-b1d51baa7cc7",
+    "emissor": "Indulbombas MILL Aperibe Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1310.22,
+    "vencimento": "2025-03-06T03:00:00.000Z",
+    "numeroDocumento": "1070602",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "0ad43416-04fc-49e4-b6ad-a695d409ec8e",
+    "emissor": "Cid Produtos Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1867.5,
+    "vencimento": "2025-02-25T03:00:00.000Z",
+    "numeroDocumento": "0970009/B",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "545f1a12-a572-4e5f-b27c-95323d39bf54",
+    "emissor": "Cid Produtos Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1366.74,
+    "vencimento": "2025-02-25T03:00:00.000Z",
+    "numeroDocumento": "95793/D",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "ea70623e-53bb-4b65-8c44-7f3fd7193c64",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 207.97,
+    "vencimento": "2025-02-20T03:00:00.000Z",
+    "numeroDocumento": "07202504300 391368",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "d68f7729-c709-4668-aae2-6d7fafa8670e",
+    "emissor": "Indulbombas MILL Aperibe Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1318.22,
+    "vencimento": "2025-02-19T03:00:00.000Z",
+    "numeroDocumento": "1070601",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": "2025-02-19T03:00:00.000Z",
+    "valorPago": 1318.22,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "edf18c27-5494-421b-b8af-194134d1de4a",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 566.87,
+    "vencimento": "2025-01-31T03:00:00.000Z",
+    "numeroDocumento": "07172501693 904670",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "28a1405c-7cd8-4ee9-b219-008ecd5487d5",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 566.87,
+    "vencimento": "2025-01-31T03:00:00.000Z",
+    "numeroDocumento": "07172501693 954103",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "ffca32e0-8028-4bad-9b3d-6bbbc4e0bfbb",
+    "emissor": "Interbrasil Distribuidora Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 967,
+    "vencimento": "2025-01-27T03:00:00.000Z",
+    "numeroDocumento": "41349322",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": "2025-02-05T03:00:00.000Z",
+    "valorPago": 967,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "80238593-37ab-4e34-9775-e74c5465bfe1",
+    "emissor": "Cid Produtos Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1867.5,
+    "vencimento": "2025-01-26T03:00:00.000Z",
+    "numeroDocumento": "97009/A",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "1f709cc9-8a4b-4e4a-8ecd-742c9426988d",
+    "emissor": "Tecnotel",
+    "descricao": "Telefonia",
+    "pagador": "",
+    "valor": 297,
+    "vencimento": "2025-01-23T03:00:00.000Z",
+    "numeroDocumento": "37887254",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Telefonia",
+    "idNotificacao": null,
+    "dataPagamento": "2025-01-23T03:00:00.000Z",
+    "valorPago": 297,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "4d5abc2c-48ba-4840-98d3-8a18842d3604",
+    "emissor": "Interbrasil Distribuidora Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1086,
+    "vencimento": "2025-01-20T03:00:00.000Z",
+    "numeroDocumento": "40910635",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": "2025-02-08T03:00:00.000Z",
+    "valorPago": 1086,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "04c7ac41-93ed-4808-85fc-62ffea7dbb59",
+    "emissor": "DARE",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 174.24,
+    "vencimento": "2025-01-20T03:00:00.000Z",
+    "numeroDocumento": null,
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "f9783b4a-b0b6-40f6-8534-b53eb8be5942",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 953.83,
+    "vencimento": "2025-01-20T03:00:00.000Z",
+    "numeroDocumento": "07202501600 892317",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "128b277d-0437-4ec5-a382-4051b886daff",
+    "emissor": "Simples Nacional",
+    "descricao": "Fiscal",
+    "pagador": "",
+    "valor": 640.72,
+    "vencimento": "2025-01-20T03:00:00.000Z",
+    "numeroDocumento": "07202501694 147866",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fiscal",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "d62fb29e-3979-4fe4-8602-38ca2b9412eb",
+    "emissor": "Tramotina Norte S/A",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1038.66,
+    "vencimento": "2025-01-15T03:00:00.000Z",
+    "numeroDocumento": "5449633",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "76ed8d13-0b62-47a1-8acb-4ca1df17349e",
+    "emissor": "Tramotina Norte S/A",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1679.36,
+    "vencimento": "2025-01-13T03:00:00.000Z",
+    "numeroDocumento": "5445973",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "92676cc7-bea7-42ec-ac93-31fb8f8b55f3",
+    "emissor": "Cid Produtos Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 4262.22,
+    "vencimento": "2025-01-02T03:00:00.000Z",
+    "numeroDocumento": "95305/C",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "0ace35a4-b349-4c5d-8fa9-99041a3185ba",
+    "emissor": "Interbrasil Distribuidora Itda",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 2200,
+    "vencimento": "2024-12-21T03:00:00.000Z",
+    "numeroDocumento": "40910625",
+    "linhaDigitavel": "",
+    "status": "pago",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": "2025-02-05T03:00:00.000Z",
+    "valorPago": 1086,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "4810526d-8cd9-4449-a435-736bd75f9f30",
+    "emissor": "Tramotina Norte S/A",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1038.65,
+    "vencimento": "2024-11-16T03:00:00.000Z",
+    "numeroDocumento": "5449631",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "1cd4b26c-5aee-404e-99b7-558d781dfe5b",
+    "emissor": "Tramotina Norte S/A",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 721.96,
+    "vencimento": "2024-11-14T03:00:00.000Z",
+    "numeroDocumento": "5341364",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  },
+  {
+    "id": "ce37c89b-f609-4a53-875e-eff3482f0856",
+    "emissor": "Tramotina Norte S/A",
+    "descricao": "Fornecimento",
+    "pagador": "",
+    "valor": 1679.36,
+    "vencimento": "2024-11-14T03:00:00.000Z",
+    "numeroDocumento": "5445971",
+    "linhaDigitavel": "",
+    "status": "vencido",
+    "observacoes": "Fornecimento",
+    "idNotificacao": null,
+    "dataPagamento": null,
+    "valorPago": null,
+    "anexoUri": null,
+    "jurosMulta": null
+  }
+]

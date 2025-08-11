@@ -39,31 +39,33 @@ const EstatisticasTela = () => {
   const [modalMesVisivel, setModalMesVisivel] = useState(false);
 
   const anosOpcoes = useMemo(() => {
-    const anos = boletos
-      .filter(b => b.dataPagamento)
-      .map(b => getYear(parseISO(b.dataPagamento)));
+const anos = (boletos || [])
+  .filter(b => b.dataPagamento)
+  .map(b => getYear(parseISO(b.dataPagamento)));
     const anosUnicos = [...new Set(anos)].sort((a, b) => b - a);
     const opcoes = anosUnicos.map(ano => ({ label: ano.toString(), value: ano }));
     return [{ label: 'Todos os Anos', value: 'todos' }, ...opcoes];
   }, [boletos]);
 
-  const boletosFiltrados = useMemo(() => {
-    if (anoSelecionado === 'todos') {
-      return boletos.filter(b => b.status === 'pago');
-    }
-    return boletos.filter(boleto => {
-      if (boleto.status !== 'pago' || !boleto.dataPagamento) return false;
-      const dataPagamento = parseISO(boleto.dataPagamento);
-      const anoBoleto = getYear(dataPagamento);
-      const mesBoleto = dataPagamento.getMonth();
-      const anoMatch = anoBoleto === anoSelecionado;
-      const mesMatch = mesSelecionado === 'todos' || mesBoleto === mesSelecionado;
-      return anoMatch && mesMatch;
-    });
-  }, [boletos, anoSelecionado, mesSelecionado]);
+const boletosFiltrados = useMemo(() => {
+  if (anoSelecionado === 'todos') {
+    return (boletos || []).filter(b => b.status === 'pago');
+  }
+  return (boletos || []).filter(boleto => {
+    if (boleto.status !== 'pago' || !boleto.dataPagamento) return false;
+    const dataPagamento = parseISO(boleto.dataPagamento);
+    const anoBoleto = getYear(dataPagamento);
+    const mesBoleto = dataPagamento.getMonth();
+    const anoMatch = anoBoleto === anoSelecionado;
+    const mesMatch = mesSelecionado === 'todos' || mesBoleto === mesSelecionado;
+    return anoMatch && mesMatch;
+  });
+}, [boletos, anoSelecionado, mesSelecionado]);
   
   const dadosEstatisticos = useMemo(() => {
-    const boletosParaCalculo = anoSelecionado === 'todos' ? boletos : boletos.filter(b => b.dataPagamento && getYear(parseISO(b.dataPagamento)) === anoSelecionado);
+    const boletosParaCalculo = anoSelecionado === 'todos'
+  ? (boletos || [])
+  : (boletos || []).filter(b => b.dataPagamento && getYear(parseISO(b.dataPagamento)) === anoSelecionado);
     const totalBoletos = boletosParaCalculo.length;
     const pagos = boletosFiltrados;
     const pendentes = boletosParaCalculo.filter(b => b.status !== 'pago');
@@ -143,10 +145,10 @@ const EstatisticasTela = () => {
   const barChartWidth = Math.max(screenWidth - tema.espacamento.medio * 4, (dadosGraficoBarras.labels?.length || 0) * 80);
 
   const handleBackup = async () => {
-    if (boletos.length === 0) {
-      Toast.show({ type: 'error', text1: 'Atenção', text2: 'Não há dados para fazer backup.' });
-      return;
-    }
+if ((boletos || []).length === 0) {
+  Toast.show({ type: 'error', text1: 'Atenção', text2: 'Não há dados para fazer backup.' });
+  return;
+}
     try {
       const dadosEmJson = JSON.stringify(boletos, null, 2);
       await Share.share({

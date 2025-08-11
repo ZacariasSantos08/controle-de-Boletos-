@@ -73,7 +73,7 @@ const ListaBoletosTela = () => {
     useFocusEffect(useCallback(() => { if (route.params?.filtro) { setFiltroAtivo(route.params.filtro); } }, [route.params?.filtro]));
 
     const boletosFiltrados = useMemo(() => {
-        let boletosProcessados = [...boletos];
+    let boletosProcessados = [...(boletos || [])];
         if (filtroAtivo !== 'mostrar_tudo') {
             if (filtroAtivo === 'pendentes') {
                 boletosProcessados = boletosProcessados.filter(b => b.status !== 'pago');

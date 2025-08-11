@@ -20,7 +20,7 @@ const FormularioBoletoTela = () => {
   const route = useRoute();
   const navigation = useNavigation();
   
-  const boletoExistente = route.params?.boletoId ? boletos.find(b => b.id === route.params.boletoId) : null;
+  const boletoExistente = route.params?.boletoId ? (boletos || []).find(b => b.id === route.params.boletoId) : null;
 
   const [valor, setValor] = useState(boletoExistente ? (boletoExistente.valor * 100).toString() : '');
   const [emissor, setEmissor] = useState(boletoExistente?.emissor || '');

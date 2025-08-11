@@ -1,7 +1,7 @@
 {
   "cli": {
     "version": ">= 7.8.2",
-    "appVersionSource": "auto"
+  "appVersionSource": "local"
   },
   "build": {
     "development": {

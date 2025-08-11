@@ -58,7 +58,7 @@ export function ProvedorBoletos({ children }) {
 
   const boletosComStatusAtualizado = useMemo(() => {
     if (!Array.isArray(boletos)) return [];
-    return boletos.map(b => ({ ...b, status: obterStatus(b) }));
+  return (boletos || []).map(b => ({ ...b, status: obterStatus(b) }));
   }, [boletos]);
 
   const adicionarBoleto = async (dadosBoleto, recorrencia) => {
@@ -93,7 +93,7 @@ export function ProvedorBoletos({ children }) {
   };
 
   const atualizarBoleto = async (boletoAtualizado) => {
-    const boletoAntigo = boletos.find(b => b.id === boletoAtualizado.id);
+  const boletoAntigo = (boletos || []).find(b => b.id === boletoAtualizado.id);
     if (boletoAntigo && boletoAntigo.vencimento !== boletoAtualizado.vencimento && boletoAntigo.idNotificacao) {
       await cancelarNotificacao(boletoAntigo.idNotificacao);
       boletoAtualizado.idNotificacao = await agendarNotificacao(boletoAtualizado);
@@ -102,7 +102,7 @@ export function ProvedorBoletos({ children }) {
   };
 
   const removerBoleto = async (idBoleto) => {
-    const boletoParaRemover = boletos.find(b => b.id === idBoleto);
+  const boletoParaRemover = (boletos || []).find(b => b.id === idBoleto);
     if (boletoParaRemover?.idNotificacao) {
       await cancelarNotificacao(boletoParaRemover.idNotificacao);
     }
@@ -114,7 +114,7 @@ export function ProvedorBoletos({ children }) {
     const boletosParaManter = [];
     const boletosParaRemover = [];
 
-    boletos.forEach(boleto => {
+  (boletos || []).forEach(boleto => {
       if (idsSet.has(boleto.id)) {
         boletosParaRemover.push(boleto);
       } else {
@@ -132,7 +132,7 @@ export function ProvedorBoletos({ children }) {
   };
 
   const marcarComoPago = async (idBoleto, dataPagamento, valorPago, jurosMulta, anexoUri) => {
-    const boletoParaPagar = boletos.find(b => b.id === idBoleto);
+  const boletoParaPagar = (boletos || []).find(b => b.id === idBoleto);
     if (boletoParaPagar?.idNotificacao) {
       await cancelarNotificacao(boletoParaPagar.idNotificacao);
     }
@@ -141,7 +141,7 @@ export function ProvedorBoletos({ children }) {
 
   const desmarcarComoPago = async (idBoleto) => {
     let boletoParaReativar = null;
-    const novosBoletos = boletos.map(b => {
+  const novosBoletos = (boletos || []).map(b => {
       if (b.id === idBoleto) {
         boletoParaReativar = { ...b, status: 'aPagar', dataPagamento: null, valorPago: null, jurosMulta: null };
         return boletoParaReativar;
@@ -154,15 +154,26 @@ export function ProvedorBoletos({ children }) {
     setBoletos(novosBoletos);
   };
 
-  const todosEmissoresUnicos = useMemo(() => { const emissores = boletos.map(b => b.emissor).filter(Boolean); return [...new Set(emissores)]; }, [boletos]);
-  const todasDescricoesUnicas = useMemo(() => { const descricoes = boletos.map(b => b.descricao).filter(Boolean); return [...new Set(descricoes)]; }, [boletos]);
-  const todosPagadoresUnicos = useMemo(() => { const pagadores = boletos.map(b => b.pagador).filter(Boolean); return [...new Set(pagadores)]; }, [boletos]);
+  const todosEmissoresUnicos = useMemo(() => {
+    const emissores = (boletos || []).map(b => b.emissor).filter(Boolean);
+    return [...new Set(emissores)];
+  }, [boletos]);
+
+  const todasDescricoesUnicas = useMemo(() => {
+    const descricoes = (boletos || []).map(b => b.descricao).filter(Boolean);
+    return [...new Set(descricoes)];
+  }, [boletos]);
+  
+  const todosPagadoresUnicos = useMemo(() => {
+    const pagadores = (boletos || []).map(b => b.pagador).filter(Boolean);
+    return [...new Set(pagadores)];
+  }, [boletos]);
 
   const importarBackup = async () => {
     const boletosDoBackup = await selecionarElerBackup();
 
     if (boletosDoBackup) {
-      const idsAtuais = new Set(boletos.map(b => b.id));
+  const idsAtuais = new Set((boletos || []).map(b => b.id));
       const boletosParaAdicionar = boletosDoBackup.filter(b => !idsAtuais.has(b.id));
 
       if (boletosParaAdicionar.length === 0) {
